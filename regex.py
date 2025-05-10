@@ -1,30 +1,31 @@
+"""Regex"""
+
 from __future__ import annotations
 from abc import ABC, abstractmethod
 
 
 class State(ABC):
-
-    @abstractmethod
+    """State"""
     def __init__(self) -> None:
-        pass
+        self.related_key_state = {}
+        self.e_transitions = []
 
     @abstractmethod
     def check_self(self, char: str) -> bool:
-        """
-        function checks whether occured character is handled by current ctate
-        """
-        pass
+        """check self"""
+        return False
 
-    def check_next(self, next_char: str) -> State | Exception:
-        for state in self.next_states:
-            if state.check_self(next_char):
-                return state
-        raise NotImplementedError("rejected string")
+    def add_related_key_state(self, symbol, state):
+        """Add a symbol-based transition from the current state to another state"""
+        self.related_key_state.setdefault(symbol, []).append(state)
+
+    def add_e_transitions(self, state):
+        """add an e-transition from the current state to another state"""
+        self.e_transitions.append(state)
 
 
 class StartState(State):
-    next_states: list[State] = []
-
+    """StartState"""
     def __init__(self):
         super().__init__()
 
@@ -33,100 +34,135 @@ class StartState(State):
 
 
 class TerminationState(State):
-    pass  # Implement
+    """TerminationState"""
+    def __init__(self):
+        super().__init__()
 
+    def check_self(self, char):
+        return super().check_self(char)
 
 class DotState(State):
-    """
-    state for . character (any character accepted)
-    """
-
-    next_states: list[State] = []
-
+    """DotState"""
     def __init__(self):
         super().__init__()
 
     def check_self(self, char: str):
-        pass  # Implement
+        return True
 
 
 class AsciiState(State):
-    """
-    state for alphabet letters or numbers
-    """
-
-    next_states: list[State] = []
-    curr_sym = ""
-
+    """AsciiState"""
     def __init__(self, symbol: str) -> None:
-        pass  # Implement
+        super().__init__()
+        self.curr_sym = symbol
 
-    def check_self(self, curr_char: str) -> State | Exception:
-        pass  # Implement
+    def check_self(self, curr_char: str) -> bool:
+        return self.curr_sym == curr_char
 
 
 class StarState(State):
-
-    next_states: list[State] = []
-
-    def __init__(self, checking_state: State):
-        pass  # Implement
+    """StarState"""
+    def __init__(self):
+        super().__init__()
 
     def check_self(self, char):
-        for state in self.next_states:
-            if state.check_self(char):
-                return True
-
-        return False
+        return super().check_self(char)
 
 
 class PlusState(State):
-    next_states: list[State] = []
-
-    def __init__(self, checking_state: State):
-        pass  # Implement
+    """PlusState"""
+    def __init__(self):
+        super().__init__()
 
     def check_self(self, char):
-        pass  # Implement
+        return super().check_self(char)
+
+
+class TempState(State):
+    """Empty state placeholder for constructing NFA"""
+    def __init__(self):
+        super().__init__()
+
+    def check_self(self, char: str) -> bool:
+        return super().check_self(char)
 
 
 class RegexFSM:
-    curr_state: State = StartState()
+    """RegexFSM"""
+    def __init__(self, messege: str) -> None:
+        self.start_state = StartState()
+        self.termination_state = TerminationState()
 
-    def __init__(self, regex_expr: str) -> None:
+        curr_start, curr_end = None, None
+        i = 0
+        while i < len(messege):
+            el = messege[i]
+            if el == "." or el.isascii():
+                fragment_start, fragment_end = self.make_start_end(el)
+                if i + 1 < len(messege) and messege[i+1] in ("*","+"):
+                    i += 1
+                    if messege[i] == "*":
+                        temp_start, temp_end = StarState(), StarState()
+                        temp_start.add_e_transitions(fragment_start)
+                        temp_start.add_e_transitions(temp_end)
+                        fragment_end.add_e_transitions(fragment_start)
+                        fragment_end.add_e_transitions(temp_end)
+                        fragment_start, fragment_end = temp_start, temp_end
+                    else:
+                        temp_start, temp_end = PlusState(), PlusState()
+                        temp_start.add_e_transitions(fragment_start)
+                        fragment_end.add_e_transitions(fragment_start)
+                        fragment_end.add_e_transitions(temp_end)
+                        fragment_start, fragment_end = temp_start, temp_end
 
-        prev_state = self.curr_state
-        tmp_next_state = self.curr_state
+                if curr_end is None:
+                    curr_start, curr_end = fragment_start, fragment_end
+                else:
+                    curr_end.add_e_transitions(fragment_start)
+                    curr_end = fragment_end
+            else:
+                raise AttributeError("Character is not supported'")
+            i += 1
 
-        for char in regex_expr:
-            tmp_next_state = self.__init_next_state(char, prev_state, tmp_next_state)
-            prev_state.next_states.append(tmp_next_state)
+        if curr_end is None:
+            self.start_state.add_e_transitions(self.termination_state)
+        else:
+            self.start_state.add_e_transitions(curr_start)
+            curr_end.add_e_transitions(self.termination_state)
 
-    def __init_next_state(
-        self, next_token: str, prev_state: State, tmp_next_state: State
-    ) -> State:
-        new_state = None
+    @staticmethod
+    def make_start_end(key: str):
+        """creates a fragment of a single-character automaton"""
+        start_ = TempState()
+        end_ = TempState()
+        start_.add_related_key_state(key, end_)
+        return start_, end_
 
-        match next_token:
-            case next_token if next_token == ".":
-                new_state = DotState()
-            case next_token if next_token == "*":
-                new_state = StarState(tmp_next_state)
-                # here you have to think, how to do it.
+    def e_transitions_closure(self, states):
+        """All attainable states from the set states via ε-transitions"""
+        stack_ = list(states)
+        res = set(states)
+        while stack_:
+            state = stack_.pop()
+            for way_e in state.e_transitions:
+                if way_e not in res:
+                    res.add(way_e)
+                    stack_.append(way_e)
+        return res
 
-            case next_token if next_token == "+":
-                pass  # Implement
-
-            case next_token if next_token.isascii():
-                new_state = AsciiState(next_token)
-
-            case _:
-                raise AttributeError("Character is not supported")
-
-        return new_state
-
-    def check_string(self):
-        pass  # Implement
+    def check_string(self, messege: str) -> bool:
+        """check messege"""
+        current_set_of_states  = self.e_transitions_closure({self.start_state})
+        for el in messege:
+            next_ = set()
+            for state in current_set_of_states:
+                for key, list_state in state.related_key_state.items():
+                    if key in ('.', el):
+                        next_.update(list_state)
+            current_set_of_states = self.e_transitions_closure(next_)
+            if not current_set_of_states:
+                return False
+        return self.termination_state in current_set_of_states
 
 
 if __name__ == "__main__":
